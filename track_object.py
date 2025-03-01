@@ -85,62 +85,63 @@ while True:
 
 # Setup initial tracking window
 x, y, w, h = bbox
+
+# Increase the ROI by a factor (e.g., 1.5)
+roi_factor = 1
+x = int(x - (roi_factor - 1) * w / 2)
+y = int(y - (roi_factor - 1) * h / 2)
+w = int(w * roi_factor)
+h = int(h * roi_factor)
+
+# Ensure the ROI is within the frame boundaries
+x = max(0, x)
+y = max(0, y)
+w = min(frame.shape[1] - x, w)
+h = min(frame.shape[0] - y, h)
+
 track_window = (x, y, w, h)
 
-# Set up the ROI for tracking
-roi = frame[y : y + h, x : x + w]
-hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-mask = cv2.inRange(
-    hsv_roi, np.array((0.0, 60.0, 32.0)), np.array((180.0, 255.0, 255.0))
-)
-roi_hist = cv2.calcHist([hsv_roi], [0], mask, [180], [0, 180])
-cv2.normalize(roi_hist, roi_hist, 0, 255, cv2.NORM_MINMAX)
-
-# Print ROI histogram to debug
-print("ROI Histogram:", roi_hist)
-
-# Setup the termination criteria
-term_crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 1)
+# Initialize the CSRT tracker
+tracker = cv2.TrackerCSRT_create()
+tracker.init(frame, track_window)
 
 # Calculate initial center point
 center = (int(x + w / 2), int(y + h / 2))
 points.append(center)
 
+frame_skip = 1  # Number of frames to skip
+
 while True:
-    ret, frame = cap.read()
+    for _ in range(frame_skip):
+        ret, frame = cap.read()
+        if not ret:
+            break
+
     if not ret:
         break
 
-    # Convert frame to HSV
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    # Update the tracker
+    success, track_window = tracker.update(frame)
 
-    # Calculate back projection
-    dst = cv2.calcBackProject([hsv], [0], roi_hist, [0, 180], 1)
+    if success:
+        # Draw tracked object and update points
+        x, y, w, h = [int(v) for v in track_window]
+        center = (int(x + w / 2), int(y + h / 2))
+        points.append(center)
 
-    # Apply CamShift to get the new location
-    ret, track_window = cv2.CamShift(dst, track_window, term_crit)
+        # Draw current position (blue dot)
+        cv2.circle(frame, center, 5, (255, 0, 0), -1)
 
-    # Print tracking window to debug
-    print("Tracking Window:", track_window)
-
-    # Draw tracked object and update points
-    pts = cv2.boxPoints(ret)
-    pts = np.int32(pts)
-    center = (int((pts[0][0] + pts[2][0]) / 2), int((pts[0][1] + pts[2][1]) / 2))
-    points.append(center)
-
-    # Draw current position (blue dot)
-    cv2.circle(frame, center, 5, (255, 0, 0), -1)
-
-    # Draw trajectory (line)
-    if len(points) > 1:
-        for i in range(1, len(points)):
-            cv2.line(frame, points[i - 1], points[i], (255, 0, 0), 5)
+        # Draw trajectory (line)
+        if len(points) > 1:
+            for i in range(1, len(points)):
+                cv2.line(frame, points[i - 1], points[i], (255, 0, 0), 5)
 
     # Display frame
     cv2.imshow("Tracking", frame)
 
-    if cv2.waitKey(30) & 0xFF == ord("q"):
+    # Reduce the delay to increase playback speed
+    if cv2.waitKey(1) & 0xFF == ord("q"):
         break
 
 cap.release()
