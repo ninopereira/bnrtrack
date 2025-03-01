@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import argparse
+import os
 
 # Global variables for mouse callback
 drawing = False
@@ -7,6 +9,8 @@ ix, iy = -1, -1
 selection_complete = False
 bbox = None
 points = []  # Store trajectory points
+original_frame = None  # Declare original_frame as a global variable
+frame = None  # Declare frame as a global variable
 
 
 def draw_rectangle(event, x, y, flags, param):
@@ -48,101 +52,123 @@ def draw_rectangle(event, x, y, flags, param):
         selection_complete = True
 
 
-# Initialize video capture
-cap = cv2.VideoCapture("sample.mp4")
+def main(input_file):
+    global original_frame, frame  # Declare original_frame and frame as global in the main function
 
-# Read first frame
-ret, frame = cap.read()
-if not ret:
-    print("Failed to read video")
-    exit()
+    # Initialize video capture
+    cap = cv2.VideoCapture(input_file)
 
-# Make a copy of the original frame
-original_frame = frame.copy()
+    # Define the codec and create VideoWriter object
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    output_file = os.path.splitext(input_file)[0] + "_out.mp4"
+    out = cv2.VideoWriter(
+        output_file, fourcc, fps * 2, (int(cap.get(3)), int(cap.get(4)))
+    )
 
-# Read second frame
-ret, frame = cap.read()
-if not ret:
-    print("Failed to read video")
-    exit()
-
-# Create window and set mouse callback
-cv2.namedWindow("Object Selection")
-cv2.setMouseCallback("Object Selection", draw_rectangle)
-
-print("Draw a rectangle around the object to track, then press ENTER")
-
-# Wait for user to draw rectangle
-while True:
-    cv2.imshow("Object Selection", frame)
-    key = cv2.waitKey(1) & 0xFF
-    if key == 13 and selection_complete:  # ENTER key
-        break
-    elif key == 27:  # ESC key
-        cap.release()
-        cv2.destroyAllWindows()
+    # Read first frame
+    ret, frame = cap.read()
+    if not ret:
+        print("Failed to read video")
         exit()
 
-# Setup initial tracking window
-x, y, w, h = bbox
+    # Make a copy of the original frame
+    original_frame = frame.copy()
 
-# Increase the ROI by a factor (e.g., 1.5)
-roi_factor = 1
-x = int(x - (roi_factor - 1) * w / 2)
-y = int(y - (roi_factor - 1) * h / 2)
-w = int(w * roi_factor)
-h = int(h * roi_factor)
+    # Read second frame
+    ret, frame = cap.read()
+    if not ret:
+        print("Failed to read video")
+        exit()
 
-# Ensure the ROI is within the frame boundaries
-x = max(0, x)
-y = max(0, y)
-w = min(frame.shape[1] - x, w)
-h = min(frame.shape[0] - y, h)
+    # Create window and set mouse callback
+    cv2.namedWindow("Object Selection")
+    cv2.setMouseCallback("Object Selection", draw_rectangle)
 
-track_window = (x, y, w, h)
+    print("Draw a rectangle around the object to track, then press ENTER")
 
-# Initialize the CSRT tracker
-tracker = cv2.TrackerCSRT_create()
-tracker.init(frame, track_window)
+    # Wait for user to draw rectangle
+    while True:
+        cv2.imshow("Object Selection", frame)
+        key = cv2.waitKey(1) & 0xFF
+        if key == 13 and selection_complete:  # ENTER key
+            break
+        elif key == 27:  # ESC key
+            cap.release()
+            cv2.destroyAllWindows()
+            exit()
 
-# Calculate initial center point
-center = (int(x + w / 2), int(y + h / 2))
-points.append(center)
+    # Setup initial tracking window
+    x, y, w, h = bbox
 
-frame_skip = 1  # Number of frames to skip
+    # Increase the ROI by a factor (e.g., 1.5)
+    roi_factor = 1
+    x = int(x - (roi_factor - 1) * w / 2)
+    y = int(y - (roi_factor - 1) * h / 2)
+    w = int(w * roi_factor)
+    h = int(h * roi_factor)
 
-while True:
-    for _ in range(frame_skip):
-        ret, frame = cap.read()
+    # Ensure the ROI is within the frame boundaries
+    x = max(0, x)
+    y = max(0, y)
+    w = min(frame.shape[1] - x, w)
+    h = min(frame.shape[0] - y, h)
+
+    track_window = (x, y, w, h)
+
+    # Initialize the CSRT tracker
+    tracker = cv2.TrackerCSRT_create()
+    tracker.init(frame, track_window)
+
+    # Calculate initial center point
+    center = (int(x + w / 2), int(y + h / 2))
+    points.append(center)
+
+    frame_skip = 1  # Number of frames to skip
+
+    while True:
+        for _ in range(frame_skip):
+            ret, frame = cap.read()
+            if not ret:
+                break
+
         if not ret:
             break
 
-    if not ret:
-        break
+        # Update the tracker
+        success, track_window = tracker.update(frame)
 
-    # Update the tracker
-    success, track_window = tracker.update(frame)
+        if success:
+            # Draw tracked object and update points
+            x, y, w, h = [int(v) for v in track_window]
+            center = (int(x + w / 2), int(y + h / 2))
+            points.append(center)
 
-    if success:
-        # Draw tracked object and update points
-        x, y, w, h = [int(v) for v in track_window]
-        center = (int(x + w / 2), int(y + h / 2))
-        points.append(center)
+            # Draw current position (blue dot)
+            cv2.circle(frame, center, 5, (255, 0, 0), -1)
 
-        # Draw current position (blue dot)
-        cv2.circle(frame, center, 5, (255, 0, 0), -1)
+            # Draw trajectory (line)
+            if len(points) > 1:
+                for i in range(1, len(points)):
+                    cv2.line(frame, points[i - 1], points[i], (255, 0, 0), 25)
 
-        # Draw trajectory (line)
-        if len(points) > 1:
-            for i in range(1, len(points)):
-                cv2.line(frame, points[i - 1], points[i], (255, 0, 0), 5)
+        # Write the frame to the output video
+        out.write(frame)
 
-    # Display frame
-    cv2.imshow("Tracking", frame)
+        # Display frame
+        cv2.imshow("Tracking", frame)
 
-    # Reduce the delay to increase playback speed
-    if cv2.waitKey(1) & 0xFF == ord("q"):
-        break
+        # Reduce the delay to increase playback speed
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            break
 
-cap.release()
-cv2.destroyAllWindows()
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Track an object in a video.")
+    parser.add_argument("input_file", help="Path to the input video file")
+    args = parser.parse_args()
+    main(args.input_file)
