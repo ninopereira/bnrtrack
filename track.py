@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import time
 
 # Initialize video capture object
 cap = cv2.VideoCapture("sample.mp4")  # Use 0 for webcam
@@ -41,6 +42,15 @@ while True:
         # Calculate the center point of the rectangle
         center = (x + w // 2, y + h // 2)
 
+        points.append(center)
+
+        # Draw lines connecting the points
+        if len(points) > 1:
+            for i in range(1, len(points)):
+                cv2.line(
+                    display_frame, points[i - 1], points[i], (255, 0, 0), 5
+                )  # Green line, 2px thickness
+
         # Draw a blue dot at the current position
         cv2.circle(
             display_frame, center, 10, (255, 0, 0), -1
@@ -52,6 +62,8 @@ while True:
     # Break the loop on 'q' key press
     if cv2.waitKey(30) & 0xFF == ord("q"):
         break
+
+    # time.sleep(0.05)
 
 # Release the video capture object and close all windows
 cap.release()
